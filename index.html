@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>写作台</title>
+<style>
+  :root {
+    --bg: #faf8f4; --panel: #f1ede6; --ink: #2b2620; --dim: #8a8071;
+    --accent: #7a5c3e; --line: #ddd5c8; --btn: #efe9df; --btn-ink: #4a4238;
+    --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
+    --sans: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --fsize: 17.5px;
+  }
+  :root[data-theme="dark"] {
+    --bg: #1e1c19; --panel: #262320; --ink: #ded7ca; --dim: #857c6d;
+    --accent: #c9a87c; --line: #3a352f; --btn: #2f2b26; --btn-ink: #cfc6b8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1e1c19; --panel: #262320; --ink: #ded7ca; --dim: #857c6d;
+      --accent: #c9a87c; --line: #3a352f; --btn: #2f2b26; --btn-ink: #cfc6b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans);
+         height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+  header { display: flex; align-items: center; gap: 7px; padding: 7px 12px;
+           border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 14px; font-weight: 600; letter-spacing: .1em; }
+  .status { font-size: 12px; color: var(--dim); margin-left: auto; }
+  button, select {
+    font-family: var(--sans); font-size: 13px; padding: 6px 11px;
+    background: var(--btn); color: var(--btn-ink); border: 1px solid var(--line);
+    border-radius: 6px; cursor: pointer; min-height: 32px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.icon { padding: 6px 9px; }
+
+  main { flex: 1; display: flex; min-height: 0; position: relative; }
+  #sidebar { width: 235px; border-right: 1px solid var(--line); background: var(--panel);
+             overflow-y: auto; padding: 8px 0 40px; flex-shrink: 0; }
+  #sidebar.collapsed { display: none; }
+  #sidebar .group { font-size: 12.5px; color: var(--dim); padding: 9px 14px 5px;
+                    letter-spacing: .1em; cursor: pointer; user-select: none; font-weight: 600; }
+  #sidebar .group:hover { color: var(--accent); }
+  #sidebar .file { padding: 7px 14px 7px 24px; font-size: 13.5px; cursor: pointer;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sidebar .file:hover { color: var(--accent); }
+  #sidebar .file.active { background: var(--bg); color: var(--accent); font-weight: 600; }
+  #sidebar .empty { padding: 4px 14px 4px 24px; font-size: 12.5px; color: var(--dim); }
+
+  #workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #editor, #reader { flex: 1; overflow-y: auto; width: 100%; font-family: var(--serif);
+                     font-size: var(--fsize); }
+  #editor { border: none; outline: none; resize: none; background: var(--bg); color: var(--ink);
+            line-height: 2.0; padding: 32px max(calc(50% - 21em), 20px) 45vh; }
+  #reader { display: none; padding: 32px max(calc(50% - 21em), 20px) 30vh; line-height: 2.1; }
+  #reader p { margin: 0 0 1em; text-indent: 2em; }
+  #reader h1, #reader h2, #reader h3, #reader h4 { text-indent: 0; margin: 1.2em 0 .8em; font-weight: 600; }
+  #reader aside { font-family: var(--sans); font-size: .75em; line-height: 1.7; color: var(--dim);
+                  border-left: 3px solid var(--accent); padding: 4px 10px; margin: 0 0 1em;
+                  background: var(--panel); border-radius: 0 6px 6px 0; text-indent: 0; }
+
+  footer { display: flex; gap: 12px; align-items: center; padding: 6px 14px;
+           border-top: 1px solid var(--line); background: var(--panel);
+           font-size: 12px; color: var(--dim); overflow-x: auto; white-space: nowrap; }
+  footer .warn { color: #c0392b; }
+  :root[data-theme="dark"] footer .warn { color: #e07b6a; }
+
+  .overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 82%, transparent);
+             z-index: 10; display: flex; align-items: center; justify-content: center; }
+  .card { width: min(460px, 92vw); background: var(--panel); border: 1px solid var(--line);
+          border-radius: 12px; padding: 26px; }
+  .card h2 { font-size: 16px; margin-bottom: 12px; }
+  .card p  { font-size: 13px; color: var(--dim); line-height: 1.8; margin-bottom: 12px; }
+  .card input, .card select { width: 100%; padding: 9px 10px; font-size: 14px; margin-bottom: 12px;
+                background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
+  .hidden { display: none !important; }
+
+  @media (max-width: 700px) {
+    header { gap: 5px; padding: 6px 8px; }
+    header h1 { display: none; }
+    #sidebar { position: absolute; z-index: 5; height: 100%; top: 0;
+               transform: translateX(-100%); transition: transform .15s; }
+    #sidebar.open { transform: none; box-shadow: 4px 0 20px rgba(0,0,0,.3); }
+    #sidebar.collapsed { display: block; }
+    #editor, #reader { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="setup" class="overlay">
+  <div class="card">
+    <h2>写作台 · 设置</h2>
+    <p>GitHub 令牌（fine-grained PAT：勾选所有要用的仓库，Contents 读写权限）。令牌只存在本设备浏览器里。留空则沿用已保存的令牌。</p>
+    <input id="tokenInput" type="password" placeholder="github_pat_…">
+    <p>仓库（多个用逗号分隔）：</p>
+    <input id="repoInput" value="cyai-hub/freedom, cyai-hub/door">
+    <button class="primary" onclick="saveSetup()">连接</button>
+    <button onclick="$('setup').classList.add('hidden')" id="setupCancel" class="hidden">取消</button>
+    <span id="setupMsg" style="font-size:12px;color:var(--dim);margin-left:8px"></span>
+  </div>
+</div>
+
+<div id="newModal" class="overlay hidden">
+  <div class="card">
+    <h2>新建文件</h2>
+    <p>位置：</p>
+    <select id="newDir"></select>
+    <p>文件名（可带子文件夹，如 <b>主线/某段</b>；无需扩展名）：</p>
+    <input id="newName" placeholder="例如：v3-11 或 主线/某段">
+    <button class="primary" onclick="confirmNew()">创建</button>
+    <button onclick="$('newModal').classList.add('hidden')">取消</button>
+    <span id="newMsg" style="font-size:12px;color:#c0392b;margin-left:8px"></span>
+  </div>
+</div>
+
+<header>
+  <button class="icon" onclick="toggleSidebar()" title="收起/展开目录">☰</button>
+  <h1>写作台</h1>
+  <select id="repoSel" onchange="switchRepo()" title="仓库"></select>
+  <select id="branchSel" onchange="switchBranch()" title="分支"></select>
+  <button onclick="openNewModal()">新建</button>
+  <button id="saveBtn" class="primary" onclick="saveFile()">保存</button>
+  <button id="modeBtn" onclick="toggleMode()">阅读</button>
+  <button onclick="addNote()" title="在光标所在行下插入批注（%%开头的行，导出时自动去除）">＋注</button>
+  <select id="exportSel" onchange="doExport(this.value); this.value='';" title="导出">
+    <option value="">导出…</option>
+    <option value="doc">Word（.doc）</option>
+    <option value="pdf">PDF（打印）</option>
+    <option value="txt">复制纯文本</option>
+  </select>
+  <button class="icon" onclick="fontSize(-1)" title="缩小字体">A−</button>
+  <button class="icon" onclick="fontSize(1)" title="放大字体">A＋</button>
+  <button class="icon" id="themeBtn" onclick="cycleTheme()" title="主题">◐</button>
+  <button class="icon" onclick="openSettings()" title="设置">⚙</button>
+  <span class="status" id="status">未连接</span>
+</header>
+
+<main>
+  <nav id="sidebar"></nav>
+  <div id="workspace">
+    <textarea id="editor" placeholder="从左侧选择文件，或点「新建」。
+
+空行分段即可，无需格式符号。文字每3秒自动暂存本机，点「保存」才写入 GitHub。" spellcheck="false"></textarea>
+    <div id="reader"></div>
+  </div>
+</main>
+
+<footer>
+  <span id="fileLabel">未打开文件</span>
+  <span id="wordCount"></span>
+  <span id="draftState"></span>
+  <span id="syncState"></span>
+  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v3.6</span>
+</footer>
+
+<script>
+const API = 'https://api.github.com';
+const ROOTS = ['drafts', '备用片段', '正文', '设定', 'chapters'];  // 展示顺序：写作区在上，大部头沉底
+const $ = id => document.getElementById(id);
+let cfg = { token: localStorage.getItem('fw_token') || '',
+            repos: JSON.parse(localStorage.getItem('fw_repos') || '["cyai-hub/freedom"]'),
+            repo:  localStorage.getItem('fw_repo')  || 'cyai-hub/freedom',
+            branch: localStorage.getItem('fw_branch') || 'main',
+            fsize: parseFloat(localStorage.getItem('fw_fsize')) || 17.5,
+            theme: localStorage.getItem('fw_theme') || 'auto' };
+if (!cfg.repos.includes(cfg.repo)) cfg.repo = cfg.repos[0];
+let cur = { path: null, sha: null, savedText: '', etag: null };
+let treeRoots = [];   // 当前仓库实际存在的根目录
+
+/* ---------- 主题 / 字号 ---------- */
+function applyTheme() {
+  if (cfg.theme === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', cfg.theme);
+  $('themeBtn').textContent = { auto: '◐', light: '☀', dark: '☾' }[cfg.theme];
+  $('themeBtn').title = '主题：' + { auto: '跟随系统', light: '日间', dark: '夜间' }[cfg.theme];
+}
+function cycleTheme() {
+  cfg.theme = { auto: 'dark', dark: 'light', light: 'auto' }[cfg.theme];
+  localStorage.setItem('fw_theme', cfg.theme); applyTheme();
+}
+function fontSize(d) {
+  cfg.fsize = Math.min(26, Math.max(14, cfg.fsize + d));
+  localStorage.setItem('fw_fsize', cfg.fsize);
+  document.documentElement.style.setProperty('--fsize', cfg.fsize + 'px');
+}
+applyTheme();
+document.documentElement.style.setProperty('--fsize', cfg.fsize + 'px');
+
+/* ---------- utf8 <-> base64 ---------- */
+function b64encode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin);
+}
+function b64decode(b64) {
+  const bin = atob(b64.replace(/\n/g, ''));
+  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+}
+
+/* ---------- GitHub API ---------- */
+function ghHeaders(extra) {
+  return { 'Authorization': 'Bearer ' + cfg.token,
+           'Accept': 'application/vnd.github+json', ...(extra || {}) };
+}
+async function gh(path, opts = {}) {
+  const r = await fetch(API + path, { ...opts, headers: ghHeaders(opts.headers) });
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 200));
+  return r.status === 204 ? null : r.json();
+}
+
+/* ---------- 设置 ---------- */
+function openSettings() {
+  $('repoInput').value = cfg.repos.join(', ');
+  $('tokenInput').value = '';
+  $('setupCancel').classList.toggle('hidden', !cfg.token);
+  $('setupMsg').textContent = '';
+  $('setup').classList.remove('hidden');
+}
+async function saveSetup() {
+  const t = $('tokenInput').value.trim();
+  if (t) cfg.token = t;
+  cfg.repos = $('repoInput').value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+  if (!cfg.repos.includes(cfg.repo)) cfg.repo = cfg.repos[0];
+  $('setupMsg').textContent = '验证中…';
+  try {
+    for (const r of cfg.repos) await gh(`/repos/${r}`);
+    localStorage.setItem('fw_token', cfg.token);
+    localStorage.setItem('fw_repos', JSON.stringify(cfg.repos));
+    localStorage.setItem('fw_repo', cfg.repo);
+    $('setup').classList.add('hidden');
+    init();
+  } catch (e) { $('setupMsg').textContent = '连接失败（令牌是否勾了所有仓库？）：' + e.message; }
+}
+
+/* ---------- 初始化 / 切换 ---------- */
+async function init() {
+  $('status').textContent = '加载中…';
+  const rsel = $('repoSel');
+  rsel.innerHTML = cfg.repos.map(r => `<option value="${r}">${r.split('/').pop()}</option>`).join('');
+  rsel.value = cfg.repo;
+  rsel.style.display = cfg.repos.length > 1 ? '' : 'none';
+  const repoInfo = await gh(`/repos/${cfg.repo}`);
+  const branches = await gh(`/repos/${cfg.repo}/branches?per_page=100`);
+  const sel = $('branchSel');
+  sel.innerHTML = branches.map(b => `<option>${b.name}</option>`).join('');
+  if (!branches.some(b => b.name === cfg.branch)) cfg.branch = repoInfo.default_branch;
+  sel.value = cfg.branch;
+  await loadTree();
+  $('status').textContent = cfg.repo.split('/').pop() + ' @ ' + cfg.branch;
+}
+function resetFile() {
+  cur = { path: null, sha: null, savedText: '', etag: null };
+  $('editor').value = ''; refreshMeta();
+}
+function switchRepo() {
+  if (dirty() && !confirm('当前文字尚未保存到 GitHub（本机已暂存）。确定切换仓库？')) {
+    $('repoSel').value = cfg.repo; return;
+  }
+  cfg.repo = $('repoSel').value;
+  cfg.branch = localStorage.getItem('fw_branch:' + cfg.repo) || '';
+  localStorage.setItem('fw_repo', cfg.repo);
+  resetFile();
+  init().catch(e => alert('切换失败：' + e.message));
+}
+function switchBranch() {
+  cfg.branch = $('branchSel').value;
+  localStorage.setItem('fw_branch', cfg.branch);
+  localStorage.setItem('fw_branch:' + cfg.repo, cfg.branch);
+  resetFile(); loadTree();
+  $('status').textContent = cfg.repo.split('/').pop() + ' @ ' + cfg.branch;
+}
+function toggleSidebar() {
+  const sb = $('sidebar');
+  if (window.matchMedia('(max-width: 700px)').matches) sb.classList.toggle('open');
+  else sb.classList.toggle('collapsed');
+}
+
+/* ---------- 文件树（git trees API，一次拿全） ---------- */
+function collapsedSet() {
+  return new Set(JSON.parse(localStorage.getItem('fw_fold:' + cfg.repo) || '[]'));
+}
+function toggleGroup(root) {
+  const s = collapsedSet();
+  s.has(root) ? s.delete(root) : s.add(root);
+  localStorage.setItem('fw_fold:' + cfg.repo, JSON.stringify([...s]));
+  renderTree();
+}
+let treeCache = [];
+async function loadTree() {
+  const data = await gh(`/repos/${cfg.repo}/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
+  treeCache = data.tree.filter(i => i.type === 'blob' && i.path.endsWith('.md')
+                                    && !i.path.endsWith('README.md'));
+  treeRoots = ROOTS.filter(r => data.tree.some(i =>
+      i.path === r || i.path.startsWith(r + '/')));
+  if (localStorage.getItem('fw_fold:' + cfg.repo) === null) {   // 首次：超过15个文件的组默认折叠
+    const big = treeRoots.filter(r => treeCache.filter(f => f.path.startsWith(r + '/')).length > 15);
+    localStorage.setItem('fw_fold:' + cfg.repo, JSON.stringify(big));
+  }
+  renderTree();
+}
+function renderTree() {
+  const fold = collapsedSet();
+  let html = '';
+  for (const root of treeRoots) {
+    const open = !fold.has(root);
+    html += `<div class="group" onclick="toggleGroup('${root}')">${open ? '▾' : '▸'} ${root}/</div>`;
+    if (!open) continue;
+    const files = treeCache.filter(f => f.path.startsWith(root + '/'))
+                           .sort((a, b) => a.path.localeCompare(b.path, 'zh'));
+    if (!files.length) html += `<div class="empty">（空）</div>`;
+    for (const f of files) {
+      const label = f.path.slice(root.length + 1).replace(/\.md$/, '');
+      html += `<div class="file" data-path="${f.path}" onclick="openFile('${f.path.replace(/'/g, "\\'")}')">${label}</div>`;
+    }
+  }
+  $('sidebar').innerHTML = html || '<div class="empty">这个分支上没有找到内容目录</div>';
+  markActive();
+}
+function markActive() {
+  document.querySelectorAll('#sidebar .file').forEach(el =>
+    el.classList.toggle('active', el.dataset.path === cur.path));
+}
+
+/* ---------- 打开 / 新建 / 保存 ---------- */
+async function fetchFile(path) {
+  const r = await fetch(`${API}/repos/${cfg.repo}/contents/${encodeURIComponent(path)}?ref=${cfg.branch}`,
+                        { headers: ghHeaders() });
+  if (!r.ok) throw new Error(r.status);
+  return { etag: r.headers.get('ETag'), data: await r.json() };
+}
+async function openFile(path) {
+  if (dirty() && !confirm('当前文字尚未保存到 GitHub（本机已暂存）。确定切换？')) return;
+  $('status').textContent = '读取中…';
+  try {
+    const { etag, data } = await fetchFile(path);
+    cur = { path, sha: data.sha, savedText: b64decode(data.content), etag };
+    const local = localStorage.getItem('fw_draft:' + cfg.repo + ':' + path);
+    $('editor').value = (local !== null && local !== cur.savedText &&
+        confirm('本机有一份比 GitHub 更新的暂存稿，恢复它吗？')) ? local : cur.savedText;
+    if ($('reader').style.display === 'block') renderReader();
+    $('sidebar').classList.remove('open');
+    $('status').textContent = cfg.repo.split('/').pop() + ' @ ' + cfg.branch;
+    $('syncState').textContent = '';
+    refreshMeta(); markActive();
+  } catch (e) { $('status').textContent = '读取失败：' + e.message; }
+}
+function openNewModal() {
+  const dirs = [...new Set([...treeRoots, 'drafts', '备用片段'])];
+  $('newDir').innerHTML = dirs.map(d => `<option>${d}</option>`).join('');
+  $('newModal').classList.remove('hidden');
+  $('newName').value = ''; $('newMsg').textContent = ''; $('newName').focus();
+}
+$('newName') && document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !$('newModal').classList.contains('hidden')) confirmNew();
+});
+function confirmNew() {
+  const name = $('newName').value.trim().replace(/\.md$/, '');
+  if (!name) { $('newMsg').textContent = '请先输入文件名'; $('newName').focus(); return; }
+  $('newMsg').textContent = '';
+  if (dirty() && !confirm('当前文字尚未保存。确定新建？')) return;
+  cur = { path: $('newDir').value + '/' + name + '.md', sha: null, savedText: '', etag: null };
+  $('newModal').classList.add('hidden');
+  $('editor').value = '';
+  refreshMeta(); markActive();
+  $('editor').focus();
+}
+async function saveFile() {
+  if (!cur.path) { alert('先打开或新建一个文件'); return; }
+  const text = $('editor').value;
+  $('saveBtn').disabled = true; $('status').textContent = '保存中…';
+  try {
+    const body = { message: '写作台：' + cur.path, content: b64encode(text), branch: cfg.branch };
+    if (cur.sha) body.sha = cur.sha;
+    const res = await gh(`/repos/${cfg.repo}/contents/${encodeURIComponent(cur.path)}`,
+                         { method: 'PUT', body: JSON.stringify(body) });
+    cur.sha = res.content.sha; cur.savedText = text; cur.etag = null;
+    localStorage.removeItem('fw_draft:' + cfg.repo + ':' + cur.path);
+    $('status').textContent = '已保存 ✓ ' + new Date().toLocaleTimeString();
+    $('syncState').textContent = '';
+    loadTree();
+  } catch (e) {
+    $('status').textContent = '保存失败';
+    alert('保存失败：' + e.message + '\n\n若提示 409/422：该文件在另一端被改过。先复制你的全文，然后重新打开该文件（会拉到最新版），再粘贴合并、保存。');
+  }
+  $('saveBtn').disabled = false;
+  refreshMeta();
+}
+
+/* ---------- 跨端同步：每30秒探测远端版本 ---------- */
+async function pollRemote() {
+  if (!cur.path || !cfg.token || document.hidden) return;
+  try {
+    const r = await fetch(`${API}/repos/${cfg.repo}/contents/${encodeURIComponent(cur.path)}?ref=${cfg.branch}`,
+      { headers: ghHeaders(cur.etag ? { 'If-None-Match': cur.etag } : {}) });
+    if (r.status === 304) return;                    // 没变化
+    if (!r.ok) return;
+    const data = await r.json();
+    cur.etag = r.headers.get('ETag');
+    if (data.sha === cur.sha) return;
+    if (!dirty()) {                                   // 本地干净 → 静默同步
+      cur.sha = data.sha; cur.savedText = b64decode(data.content);
+      $('editor').value = cur.savedText;
+      if ($('reader').style.display === 'block') renderReader();
+      refreshMeta();
+      $('syncState').textContent = '已同步另一端的更新 ✓ ' + new Date().toLocaleTimeString();
+    } else {                                          // 本地有改动 → 只警告
+      $('syncState').innerHTML = '<span class="warn">⚠ 另一端已更新此文件，直接保存会冲突</span>';
+    }
+  } catch (e) { /* 网络抖动忽略，下轮再试 */ }
+}
+setInterval(pollRemote, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollRemote(); });
+
+/* ---------- 本机暂存 / 字数 ---------- */
+function dirty() { return cur.path && $('editor').value !== cur.savedText; }
+function refreshMeta() {
+  $('fileLabel').textContent = cur.path || '未打开文件';
+  const t = $('editor').value;
+  const zh = (stripNotes(t).match(/[一-鿿]/g) || []).length;
+  const nn = t.split('\n').filter(isNote).length;
+  $('wordCount').textContent = t ? `${zh} 字${nn ? ' · ' + nn + '条注' : ''}` : '';
+  $('draftState').textContent = dirty() ? '● 未保存（已本机暂存）' : '';
+}
+setInterval(() => {
+  if (dirty()) localStorage.setItem('fw_draft:' + cfg.repo + ':' + cur.path, $('editor').value);
+}, 3000);
+$('editor').addEventListener('input', refreshMeta);
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
+});
+window.addEventListener('beforeunload', e => { if (dirty()) e.preventDefault(); });
+
+/* ---------- 批注：%%开头的行 ---------- */
+const isNote = l => l.trimStart().startsWith('%%');
+function stripNotes(t) { return t.split('\n').filter(l => !isNote(l)).join('\n'); }
+function addNote() {
+  if ($('reader').style.display === 'block') { alert('请切回写作模式再加注'); return; }
+  const ed = $('editor'), t = ed.value, pos = ed.selectionStart ?? t.length;
+  let lineEnd = t.indexOf('\n', pos); if (lineEnd === -1) lineEnd = t.length;
+  const st = ed.scrollTop;
+  ed.setRangeText('\n%% ', lineEnd, lineEnd, 'end');   // 保留滚动位置与撤销历史
+  ed.focus({ preventScroll: true });
+  ed.scrollTop = st;
+  refreshMeta();
+}
+
+/* ---------- 阅读模式 ---------- */
+function textToHTML(t, showNotes) {
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return t.split(/\n{2,}/).map(seg => {
+    seg = seg.trim(); if (!seg) return '';
+    let html = '', run = [], afterNote = false;
+    const flush = () => {
+      if (!run.length) return;
+      html += `<p${afterNote ? ' style="text-indent:0"' : ''}>` + run.map(esc).join('<br>') + '</p>';
+      run = []; afterNote = false;
+    };
+    for (const l of seg.split(/\n/)) {
+      const h = l.match(/^(#{1,3})\s+(.*)/);
+      if (isNote(l)) {
+        flush();
+        if (showNotes) html += `<aside>📝 ${esc(l.replace(/^\s*%%+\s?/, ''))}</aside>`;
+        afterNote = true;
+      } else if (h) {
+        flush();
+        html += `<h${h[1].length+1}>${esc(h[2])}</h${h[1].length+1}>`;
+      } else run.push(l);
+    }
+    flush();
+    return html;
+  }).join('\n');
+}
+function renderReader() { $('reader').innerHTML = textToHTML($('editor').value, true); }
+function toggleMode() {
+  const reading = $('reader').style.display !== 'block';
+  if (reading) renderReader();
+  $('reader').style.display = reading ? 'block' : 'none';
+  $('editor').style.display = reading ? 'none' : 'block';
+  $('modeBtn').textContent = reading ? '写作' : '阅读';
+}
+
+/* ---------- 导出 ---------- */
+function baseName() { return (cur.path || '未命名').split('/').pop().replace('.md', ''); }
+function exportHTML(forPrint) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${baseName()}</title>
+  <style>body{font-family:"Noto Serif SC","Songti SC","SimSun",serif;font-size:12pt;
+  line-height:2.0;max-width:42em;margin:2em auto;color:#000;background:#fff}
+  p{margin:0 0 .9em;text-indent:2em}h1,h2,h3,h4{text-indent:0}</style></head>
+  <body>${textToHTML(stripNotes($('editor').value), false)}${forPrint ? '<script>window.print()<\/script>' : ''}</body></html>`;
+}
+function doExport(kind) {
+  if (!kind) return;
+  if (!$('editor').value.trim()) { alert('当前没有内容'); return; }
+  if (kind === 'doc') {
+    const blob = new Blob(['﻿' + exportHTML(false)], { type: 'application/msword' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = baseName() + '.doc'; a.click();
+    URL.revokeObjectURL(a.href);
+  } else if (kind === 'pdf') {
+    const w = window.open('', '_blank');
+    w.document.write(exportHTML(true)); w.document.close();
+  } else if (kind === 'txt') {
+    navigator.clipboard.writeText(stripNotes($('editor').value))
+      .then(() => $('status').textContent = '纯文本已复制 ✓')
+      .catch(() => alert('复制失败，请手动全选复制'));
+  }
+}
+
+/* ---------- 启动 ---------- */
+if (cfg.token) {
+  $('setup').classList.add('hidden');
+  init().catch(e => { openSettings(); $('setupMsg').textContent = '连接失败：' + e.message; });
+}
+</script>
+</body>
+</html>
