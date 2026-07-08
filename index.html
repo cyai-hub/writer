@@ -64,6 +64,14 @@
   #reader aside { font-family: var(--sans); font-size: .75em; line-height: 1.7; color: var(--dim);
                   border-left: 3px solid var(--accent); padding: 4px 10px; margin: 0 0 1em;
                   background: var(--panel); border-radius: 0 6px 6px 0; text-indent: 0; }
+  #reader aside.reply { margin: -.7em 0 1em 1.6em; border-left-color: var(--line); }
+  #reader aside .replyBtn { font-family: var(--sans); font-size: 11.5px; padding: 1px 8px; min-height: 0;
+                            margin-left: 10px; opacity: .75; }
+  #reader .replyBox { margin-top: 6px; }
+  #reader .replyBox textarea { width: 100%; font-family: var(--sans); font-size: 13px; line-height: 1.6;
+      background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+      padding: 6px 8px; resize: vertical; }
+  #reader .replyBox button { font-size: 12px; padding: 3px 10px; min-height: 0; margin-top: 4px; }
 
   footer { display: flex; gap: 12px; align-items: center; padding: 6px 14px;
            border-top: 1px solid var(--line); background: var(--panel);
@@ -170,9 +178,10 @@
 <footer>
   <span id="fileLabel">未打开文件</span>
   <span id="wordCount"></span>
+  <span id="selCount"></span>
   <span id="draftState"></span>
   <span id="syncState"></span>
-  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v3.7</span>
+  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v3.8</span>
 </footer>
 
 <script>
@@ -449,6 +458,21 @@ setInterval(() => {
   if (dirty()) localStorage.setItem('fw_draft:' + cfg.repo + ':' + cur.path, $('editor').value);
 }, 3000);
 $('editor').addEventListener('input', refreshMeta);
+
+/* ---------- 选中字数（与底栏口径一致：数汉字、剥批注行） ---------- */
+function updateSelCount() {
+  const ed = $('editor');
+  let sel = '';
+  if (ed.style.display !== 'none' && document.activeElement === ed)
+    sel = ed.value.substring(ed.selectionStart, ed.selectionEnd);
+  else if (window.getSelection)
+    sel = window.getSelection().toString();
+  const zh = (sel.split('\n').filter(l => !isNote(l)).join('').match(/[一-鿿]/g) || []).length;
+  $('selCount').textContent = sel.trim() ? `选中 ${zh} 字` : '';
+}
+document.addEventListener('selectionchange', updateSelCount);
+['select', 'keyup', 'mouseup', 'touchend'].forEach(ev =>
+  $('editor').addEventListener(ev, updateSelCount));
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
 });
@@ -469,32 +493,73 @@ function addNote() {
 }
 
 /* ---------- 阅读模式 ---------- */
+const noteBody = l => l.replace(/^\s*%%+\s?/, '');
+const isReplyNote = l => isNote(l) && noteBody(l).startsWith('↳');
 function textToHTML(t, showNotes) {
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  return t.split(/\n{2,}/).map(seg => {
-    seg = seg.trim(); if (!seg) return '';
-    let html = '', run = [], afterNote = false;
-    const flush = () => {
-      if (!run.length) return;
-      html += `<p${afterNote ? ' style="text-indent:0"' : ''}>` + run.map(esc).join('<br>') + '</p>';
-      run = []; afterNote = false;
-    };
-    for (const l of seg.split(/\n/)) {
-      const h = l.match(/^(#{1,3})\s+(.*)/);
-      if (isNote(l)) {
-        flush();
-        if (showNotes) html += `<aside>📝 ${esc(l.replace(/^\s*%%+\s?/, ''))}</aside>`;
-        afterNote = true;
-      } else if (h) {
-        flush();
-        html += `<h${h[1].length+1}>${esc(h[2])}</h${h[1].length+1}>`;
-      } else run.push(l);
-    }
-    flush();
-    return html;
-  }).join('\n');
+  const lines = t.split('\n');
+  let html = '', run = [], afterNote = false;
+  const flush = () => {
+    if (!run.length) return;
+    html += `<p${afterNote ? ' style="text-indent:0"' : ''}>` + run.map(esc).join('<br>') + '</p>';
+    run = []; afterNote = false;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim()) { flush(); continue; }
+    const h = l.match(/^(#{1,3})\s+(.*)/);
+    if (isNote(l)) {
+      flush();
+      if (showNotes) {
+        const body = noteBody(l), reply = body.startsWith('↳');
+        const icon = reply ? '' : (/^小猫\s*[：:]/.test(body) ? '🐱 ' : '📝 ');
+        html += `<aside${reply ? ' class="reply"' : ''}>${icon}${esc(body)}` +
+                `<button class="replyBtn" onclick="startReply(${i}, this)">回复</button></aside>`;
+      }
+      afterNote = true;
+    } else if (h) {
+      flush();
+      html += `<h${h[1].length+1}>${esc(h[2])}</h${h[1].length+1}>`;
+    } else run.push(l);
+  }
+  flush();
+  return html;
 }
 function renderReader() { $('reader').innerHTML = textToHTML($('editor').value, true); }
+
+/* ---------- 批注回复：插入 %% ↳ 行到被回复批注（及已有回复）下方 ---------- */
+function startReply(line, btn) {
+  const aside = btn.closest('aside');
+  if (aside.querySelector('.replyBox')) return;
+  btn.style.display = 'none';
+  const box = document.createElement('div');
+  box.className = 'replyBox';
+  box.innerHTML = `<textarea rows="2" placeholder="写回复… (Ctrl/Cmd+Enter 插入)"></textarea>
+    <div><button class="primary">插入</button> <button>取消</button></div>`;
+  const ta = box.querySelector('textarea');
+  const [okBtn, cancelBtn] = box.querySelectorAll('div button');
+  okBtn.onclick = () => confirmReply(line, ta.value);
+  cancelBtn.onclick = () => { box.remove(); btn.style.display = ''; };
+  ta.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') confirmReply(line, ta.value);
+    if (e.key === 'Escape') cancelBtn.onclick();
+  });
+  aside.appendChild(box);
+  ta.focus();
+}
+function confirmReply(line, text) {
+  text = text.trim().replace(/\n+/g, ' ');
+  if (!text) return;
+  const lines = $('editor').value.split('\n');
+  let at = line + 1;
+  while (at < lines.length && isReplyNote(lines[at])) at++;   // 排在已有回复后面
+  lines.splice(at, 0, '%% ↳ ' + text);
+  $('editor').value = lines.join('\n');
+  refreshMeta();
+  const st = $('reader').scrollTop;
+  renderReader();
+  $('reader').scrollTop = st;
+}
 function toggleMode() {
   const reading = $('reader').style.display !== 'block';
   if (reading) renderReader();
