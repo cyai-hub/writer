@@ -181,7 +181,7 @@
   <span id="selCount"></span>
   <span id="draftState"></span>
   <span id="syncState"></span>
-  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v3.8</span>
+  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v3.9</span>
 </footer>
 
 <script>
@@ -498,10 +498,10 @@ const isReplyNote = l => isNote(l) && noteBody(l).startsWith('↳');
 function textToHTML(t, showNotes) {
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const lines = t.split('\n');
-  let html = '', run = [], afterNote = false;
+  let html = '', run = [], runStart = 0, afterNote = false;
   const flush = () => {
     if (!run.length) return;
-    html += `<p${afterNote ? ' style="text-indent:0"' : ''}>` + run.map(esc).join('<br>') + '</p>';
+    html += `<p data-line="${runStart}"${afterNote ? ' style="text-indent:0"' : ''}>` + run.map(esc).join('<br>') + '</p>';
     run = []; afterNote = false;
   };
   for (let i = 0; i < lines.length; i++) {
@@ -513,14 +513,14 @@ function textToHTML(t, showNotes) {
       if (showNotes) {
         const body = noteBody(l), reply = body.startsWith('↳');
         const icon = reply ? '' : (/^小猫\s*[：:]/.test(body) ? '🐱 ' : '📝 ');
-        html += `<aside${reply ? ' class="reply"' : ''}>${icon}${esc(body)}` +
+        html += `<aside data-line="${i}"${reply ? ' class="reply"' : ''}>${icon}${esc(body)}` +
                 `<button class="replyBtn" onclick="startReply(${i}, this)">回复</button></aside>`;
       }
       afterNote = true;
     } else if (h) {
       flush();
-      html += `<h${h[1].length+1}>${esc(h[2])}</h${h[1].length+1}>`;
-    } else run.push(l);
+      html += `<h${h[1].length+1} data-line="${i}">${esc(h[2])}</h${h[1].length+1}>`;
+    } else { if (!run.length) runStart = i; run.push(l); }
   }
   flush();
   return html;
@@ -560,11 +560,73 @@ function confirmReply(line, text) {
   renderReader();
   $('reader').scrollTop = st;
 }
+/* ---------- 模式切换滚动同步：按源文本行号锚定，两边定位到同一行 ---------- */
+// 用隐藏镜像div量出编辑区每个源文本行的像素top（含自动换行），须在编辑区可见时调用
+function editorLineTops() {
+  const ed = $('editor'), cs = getComputedStyle(ed);
+  const m = document.createElement('div');
+  m.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0;' +
+                    'box-sizing:border-box;border:0;white-space:pre-wrap;overflow-wrap:break-word;';
+  for (const p of ['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','paddingLeft','paddingRight'])
+    m.style[p] = cs[p];
+  m.style.width = ed.clientWidth + 'px';
+  for (const l of ed.value.split('\n')) {
+    const d = document.createElement('div');
+    d.textContent = l || '\u200b';  // 空行用零宽空格占位，保住一行高度
+    m.appendChild(d);
+  }
+  document.body.appendChild(m);
+  const tops = [...m.children].map(c => c.offsetTop);
+  const end = m.offsetHeight;
+  m.remove();
+  return { tops, end, padTop: parseFloat(cs.paddingTop) };
+}
+// 阅读区各块的位置（滚动坐标系），须在阅读区可见时调用
+function readerBlocks() {
+  const rd = $('reader'), base = rd.getBoundingClientRect().top - rd.scrollTop;
+  return [...rd.querySelectorAll('[data-line]')].map(el => ({
+    line: +el.dataset.line, h: el.offsetHeight,
+    top: el.getBoundingClientRect().top - base
+  }));
+}
+// 写作 → 阅读：编辑区视口顶部那一行，滚到阅读区同一行
+function editorScrollToReader(yEd, mir) {
+  const blocks = readerBlocks();
+  const y = yEd - mir.padTop;                       // 两边顶部留白相同，留白区内1:1
+  if (!blocks.length || y <= 0) return Math.max(0, yEd);
+  let i = mir.tops.length - 1;
+  for (let j = 1; j < mir.tops.length; j++) if (mir.tops[j] > y) { i = j - 1; break; }
+  let k = 0;
+  for (let j = 0; j < blocks.length; j++) { if (blocks[j].line <= i) k = j; else break; }
+  const b = blocks[k], next = k + 1 < blocks.length ? blocks[k + 1].line : mir.tops.length;
+  const srcTop = mir.tops[Math.min(b.line, mir.tops.length - 1)];
+  const srcH = (next < mir.tops.length ? mir.tops[next] : mir.end) - srcTop;
+  return Math.max(0, b.top + (y - srcTop) * (srcH > 0 ? b.h / srcH : 1));
+}
+// 阅读 → 写作：blocks 须在切换前量好传入
+function readerScrollToEditor(yRd, blocks) {
+  const mir = editorLineTops();
+  let k = -1;
+  for (let j = 0; j < blocks.length; j++) { if (blocks[j].top <= yRd) k = j; else break; }
+  if (k < 0) return Math.max(0, yRd);               // 还在顶部留白里
+  const b = blocks[k], next = k + 1 < blocks.length ? blocks[k + 1].line : mir.tops.length;
+  const srcTop = mir.tops[Math.min(b.line, mir.tops.length - 1)];
+  const srcH = (next < mir.tops.length ? mir.tops[next] : mir.end) - srcTop;
+  return Math.max(0, mir.padTop + srcTop + (yRd - b.top) * (b.h > 0 ? srcH / b.h : 1));
+}
 function toggleMode() {
-  const reading = $('reader').style.display !== 'block';
-  if (reading) renderReader();
-  $('reader').style.display = reading ? 'block' : 'none';
-  $('editor').style.display = reading ? 'none' : 'block';
+  const ed = $('editor'), rd = $('reader');
+  const reading = rd.style.display !== 'block';
+  if (reading) {
+    const yEd = ed.scrollTop, mir = editorLineTops();   // 编辑区还可见时量
+    renderReader();
+    rd.style.display = 'block'; ed.style.display = 'none';
+    rd.scrollTop = editorScrollToReader(yEd, mir);      // 切完再定位（隐藏元素设不了滚动）
+  } else {
+    const yRd = rd.scrollTop, blocks = readerBlocks();  // 阅读区还可见时量
+    ed.style.display = 'block'; rd.style.display = 'none';
+    ed.scrollTop = readerScrollToEditor(yRd, blocks);
+  }
   $('modeBtn').textContent = reading ? '写作' : '阅读';
 }
 
