@@ -182,7 +182,7 @@
   <span id="selCount"></span>
   <span id="draftState"></span>
   <span id="syncState"></span>
-  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v4.0</span>
+  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v4.1</span>
 </footer>
 
 <script>
@@ -324,7 +324,11 @@ async function loadTree() {
   const data = await gh(`/repos/${cfg.repo}/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
   treeCache = data.tree.filter(i => i.type === 'blob' && i.path.endsWith('.md')
                                     && !i.path.endsWith('README.md'));
-  const dirs = [...new Set(treeCache.filter(f => f.path.includes('/')).map(f => f.path.split('/')[0]))];
+  // 目录来源：含.md的顶层文件夹 ＋ 用.gitkeep占位的空文件夹（删光文件后写作台自动放的）
+  const kept = data.tree.filter(i => i.type === 'blob' && i.path.endsWith('/.gitkeep'))
+                        .map(i => i.path.split('/')[0]);
+  const dirs = [...new Set([...treeCache.filter(f => f.path.includes('/')).map(f => f.path.split('/')[0]),
+                            ...kept])];
   treeRoots = [...ROOTS.filter(r => dirs.includes(r)),
                ...dirs.filter(d => !ROOTS.includes(d)).sort((a, b) => a.localeCompare(b, 'zh'))];
   if (localStorage.getItem('fw_fold:' + cfg.repo) === null) {   // 首次：超过15个文件的组默认折叠
@@ -381,7 +385,8 @@ async function openFile(path) {
 }
 function openNewModal() {
   const dirs = [...new Set([...treeRoots, 'drafts', '备用片段'])];
-  $('newDir').innerHTML = dirs.map(d => `<option>${d}</option>`).join('');
+  $('newDir').innerHTML = dirs.map(d => `<option>${d}</option>`).join('') +
+                          '<option value="">（根目录——文件名写成 文件夹/文件名 可新建文件夹）</option>';
   $('newModal').classList.remove('hidden');
   $('newName').value = ''; $('newMsg').textContent = ''; $('newName').focus();
 }
@@ -391,9 +396,14 @@ $('newName') && document.addEventListener('keydown', e => {
 function confirmNew() {
   const name = $('newName').value.trim().replace(/\.md$/, '');
   if (!name) { $('newMsg').textContent = '请先输入文件名'; $('newName').focus(); return; }
+  const dir = $('newDir').value;
+  if (!dir && !name.includes('/')) {
+    $('newMsg').textContent = '根目录文件不会显示在左侧目录，请写成 文件夹/文件名';
+    $('newName').focus(); return;
+  }
   $('newMsg').textContent = '';
   if (dirty() && !confirm('当前文字尚未保存。确定新建？')) return;
-  cur = { path: $('newDir').value + '/' + name + '.md', sha: null, savedText: '', etag: null };
+  cur = { path: (dir ? dir + '/' : '') + name + '.md', sha: null, savedText: '', etag: null };
   $('newModal').classList.add('hidden');
   $('editor').value = '';
   refreshMeta(); markActive();
@@ -438,6 +448,16 @@ async function deleteFile() {
              { method: 'DELETE',
                body: JSON.stringify({ message: '写作台：删除 ' + cur.path,
                                       sha: cur.sha, branch: cfg.branch }) });
+    // Git 不保留空文件夹：若删的是该文件夹最后一个文件，放一个 .gitkeep 占位留住文件夹
+    const root = cur.path.split('/')[0];
+    if (!treeCache.some(f => f.path !== cur.path && f.path.startsWith(root + '/'))) {
+      try {
+        await gh(`/repos/${cfg.repo}/contents/${encodeURIComponent(root + '/.gitkeep')}`,
+                 { method: 'PUT',
+                   body: JSON.stringify({ message: '写作台：保留空文件夹 ' + root,
+                                          content: '', branch: cfg.branch }) });
+      } catch (e) { /* 占位失败不影响删除本身 */ }
+    }
     localStorage.removeItem(draftKey);
     resetFile();
     if ($('reader').style.display === 'block') renderReader();
