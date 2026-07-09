@@ -152,6 +152,7 @@
   <button id="saveBtn" class="primary" onclick="saveFile()">保存</button>
   <button id="modeBtn" onclick="toggleMode()">阅读</button>
   <button onclick="addNote()" title="在光标所在行下插入批注（%%开头的行，导出时自动去除）">＋注</button>
+  <button class="icon" onclick="deleteFile()" title="删除当前文件（从 GitHub 删除，需确认）">🗑</button>
   <select id="exportSel" onchange="doExport(this.value); this.value='';" title="导出">
     <option value="">导出…</option>
     <option value="doc">Word（.doc）</option>
@@ -181,12 +182,12 @@
   <span id="selCount"></span>
   <span id="draftState"></span>
   <span id="syncState"></span>
-  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v3.9</span>
+  <span style="margin-left:auto">Ctrl/Cmd+S 保存 · v4.0</span>
 </footer>
 
 <script>
 const API = 'https://api.github.com';
-const ROOTS = ['drafts', '备用片段', '正文', '设定', 'chapters'];  // 展示顺序：写作区在上，大部头沉底
+const ROOTS = ['drafts', '备用片段', '正文', '设定', 'chapters'];  // 只管排序偏好：写作区在上，大部头沉底；名单外的目录也显示，排在后面
 const $ = id => document.getElementById(id);
 let cfg = { token: localStorage.getItem('fw_token') || '',
             repos: JSON.parse(localStorage.getItem('fw_repos') || '["cyai-hub/freedom"]'),
@@ -323,8 +324,9 @@ async function loadTree() {
   const data = await gh(`/repos/${cfg.repo}/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
   treeCache = data.tree.filter(i => i.type === 'blob' && i.path.endsWith('.md')
                                     && !i.path.endsWith('README.md'));
-  treeRoots = ROOTS.filter(r => data.tree.some(i =>
-      i.path === r || i.path.startsWith(r + '/')));
+  const dirs = [...new Set(treeCache.filter(f => f.path.includes('/')).map(f => f.path.split('/')[0]))];
+  treeRoots = [...ROOTS.filter(r => dirs.includes(r)),
+               ...dirs.filter(d => !ROOTS.includes(d)).sort((a, b) => a.localeCompare(b, 'zh'))];
   if (localStorage.getItem('fw_fold:' + cfg.repo) === null) {   // 首次：超过15个文件的组默认折叠
     const big = treeRoots.filter(r => treeCache.filter(f => f.path.startsWith(r + '/')).length > 15);
     localStorage.setItem('fw_fold:' + cfg.repo, JSON.stringify(big));
@@ -336,7 +338,7 @@ function renderTree() {
   let html = '';
   for (const root of treeRoots) {
     const open = !fold.has(root);
-    html += `<div class="group" onclick="toggleGroup('${root}')">${open ? '▾' : '▸'} ${root}/</div>`;
+    html += `<div class="group" onclick="toggleGroup('${root.replace(/'/g, "\\'")}')">${open ? '▾' : '▸'} ${root}/</div>`;
     if (!open) continue;
     const files = treeCache.filter(f => f.path.startsWith(root + '/'))
                            .sort((a, b) => a.path.localeCompare(b.path, 'zh'));
@@ -417,6 +419,34 @@ async function saveFile() {
   }
   $('saveBtn').disabled = false;
   refreshMeta();
+}
+
+async function deleteFile() {
+  if (!cur.path) { alert('先打开一个文件'); return; }
+  const draftKey = 'fw_draft:' + cfg.repo + ':' + cur.path;
+  if (!cur.sha) {                                   // 新建后还没保存过，只需本地丢弃
+    if (!confirm(`「${cur.path}」还没保存到 GitHub，直接丢弃？`)) return;
+    localStorage.removeItem(draftKey);
+    resetFile();
+    if ($('reader').style.display === 'block') renderReader();
+    markActive(); return;
+  }
+  if (!confirm(`确定删除「${cur.path}」？\n将从 ${cfg.repo} 的 ${cfg.branch} 分支删除该文件（Git 历史里仍可找回）。`)) return;
+  $('status').textContent = '删除中…';
+  try {
+    await gh(`/repos/${cfg.repo}/contents/${encodeURIComponent(cur.path)}`,
+             { method: 'DELETE',
+               body: JSON.stringify({ message: '写作台：删除 ' + cur.path,
+                                      sha: cur.sha, branch: cfg.branch }) });
+    localStorage.removeItem(draftKey);
+    resetFile();
+    if ($('reader').style.display === 'block') renderReader();
+    $('status').textContent = '已删除 ✓ ' + new Date().toLocaleTimeString();
+    loadTree();
+  } catch (e) {
+    $('status').textContent = '删除失败';
+    alert('删除失败：' + e.message + '\n\n若提示 409/422：该文件在另一端被改过。重新打开该文件（拉到最新版）再删。');
+  }
 }
 
 /* ---------- 跨端同步：每30秒探测远端版本 ---------- */
